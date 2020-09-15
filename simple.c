@@ -6,8 +6,10 @@
 #include <rte_eal.h>
 #include <rte_common.h>
 #include <rte_ethdev.h>
+#include <rte_ether.h>
 #include <rte_log.h>
 #include <rte_mbuf.h>
+#include <rte_version.h>
 
 static volatile bool force_quit;
 
@@ -22,7 +24,7 @@ static volatile bool force_quit;
 #define RX_RING_SIZE 128
 #define TX_RING_SIZE 512
 
-static uint8_t forwarding_lcore = 1;
+/*static uint8_t forwarding_lcore = 1;*/
 static uint8_t mac_swap = 1;
 
 static int
@@ -49,6 +51,20 @@ check_link_status(uint16_t nb_ports)
 static void
 simple_mac_swap(struct rte_mbuf **bufs, uint16_t nb_mbufs)
 {
+#if RTE_VERSION >= RTE_VERSION_NUM(19,11,0,16)
+	struct rte_ether_hdr *eth;
+	struct rte_ether_addr tmp;
+	struct rte_mbuf *m;
+	uint16_t buf;
+
+	for (buf = 0; buf < nb_mbufs; buf++) {
+		m = bufs[buf];
+		eth = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+		rte_ether_addr_copy(&eth->s_addr, &tmp);
+		rte_ether_addr_copy(&eth->d_addr, &eth->s_addr);
+		rte_ether_addr_copy(&tmp, &eth->d_addr);
+	}
+#else
 	struct ether_hdr *eth;
 	struct ether_addr tmp;
 	struct rte_mbuf *m;
@@ -61,19 +77,24 @@ simple_mac_swap(struct rte_mbuf **bufs, uint16_t nb_mbufs)
 		ether_addr_copy(&eth->d_addr, &eth->s_addr);
 		ether_addr_copy(&tmp, &eth->d_addr);
 	}
+#endif
 }
 
 int lcore_main(void *arg)
 {
-	unsigned int lcore_id = rte_lcore_id();
+  /*unsigned int lcore_id = rte_lcore_id();*/
+#if RTE_VERSION >= RTE_VERSION_NUM(19,11,0,16)
+	const uint8_t nb_ports = rte_eth_dev_count_avail();
+#else
 	const uint8_t nb_ports = rte_eth_dev_count();
+#endif
 	uint8_t port;
 	uint8_t dest_port;
 
-	if (lcore_id != forwarding_lcore) {
+	/*if (lcore_id != forwarding_lcore) {
 		RTE_LOG(INFO, APP, "lcore %u exiting\n", lcore_id);
 		return 0;
-	}
+		}*/
 
 	/* Run until the application is quit or killed. */
 	while (!force_quit) {
@@ -120,7 +141,11 @@ static inline int
 port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 {
 	struct rte_eth_conf port_conf = {
+#if RTE_VERSION >= RTE_VERSION_NUM(19,11,0,16)
+		.rxmode = { .max_rx_pkt_len = RTE_ETHER_MAX_LEN }
+#else
 		.rxmode = { .max_rx_pkt_len = ETHER_MAX_LEN }
+#endif
 	};
 	const uint16_t nb_rx_queues = 1;
 	const uint16_t nb_tx_queues = 1;
@@ -168,7 +193,11 @@ static void
 print_stats(void)
 {
 	struct rte_eth_stats stats;
+#if RTE_VERSION >= RTE_VERSION_NUM(19,11,0,16)
+	uint8_t nb_ports = rte_eth_dev_count_avail();
+#else
 	uint8_t nb_ports = rte_eth_dev_count();
+#endif
 	uint8_t port;
 
 	for (port = 0; port < nb_ports; port++) {
@@ -231,7 +260,11 @@ int main(int argc, char *argv[])
 	 * Check that there is an even number of ports to
 	 * send/receive on.
 	 */
+#if RTE_VERSION >= RTE_VERSION_NUM(19,11,0,16)
+	nb_ports = rte_eth_dev_count_avail();
+#else
 	nb_ports = rte_eth_dev_count();
+#endif
 	if (nb_ports < 2 || (nb_ports & 1))
 		rte_exit(EXIT_FAILURE, "Invalid port number\n");
 
